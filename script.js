@@ -1,5 +1,8 @@
 // Estado inicial
-let alcanceMaximo = 1.00; // metros
+let alcanceMaximo = 1.0; // metros
+const deviceId = 'esp32_01';
+let currentUid = null;
+let configListenerRef = null;
 
 const btnConectar = document.getElementById('btn_conectar');
 const txtStatus = document.getElementById('txt_status_conexao');
@@ -19,13 +22,15 @@ const wifiPass = document.getElementById('wifi_pass');
 const btnSendWifi = document.getElementById('btn_send_wifi');
 const txtWifiFeedback = document.getElementById('txt_wifi_feedback');
 
-function formatMeters(v){ return (v/100).toFixed(2) + 'm' }
+function formatMeters(v) {
+  return (v / 100).toFixed(2) + 'm';
+}
 
-function updateVibrationInfo(){
+function updateVibrationInfo() {
   let info = '';
-  if (alcanceMaximo === 1.00){
+  if (alcanceMaximo === 1.0) {
     info = `📏 Modo Perto (1,00m):\n• < 0,60m → Vibração Forte\n• 0,60m - 0,80m → Vibração Média\n• 0,80m - 1,00m → Vibração Leve`;
-  } else if (alcanceMaximo === 1.50){
+  } else if (alcanceMaximo === 1.5) {
     info = `📏 Modo Médio (1,50m):\n• < 0,40m → Vibração Forte\n• 0,40m - 0,80m → Vibração Média\n• 0,80m - 1,50m → Vibração Leve`;
   } else {
     const forte = (alcanceMaximo * 0.4).toFixed(2);
@@ -35,19 +40,19 @@ function updateVibrationInfo(){
   txtInfo.textContent = info;
 }
 
-function simulateSensorReading(distanceMeters){
+function simulateSensorReading(distanceMeters) {
   txtDist.textContent = distanceMeters.toFixed(2) + 'm';
   let intensidade = 'Nenhuma ⚪';
   const d = distanceMeters;
 
-  if (alcanceMaximo === 1.00){
-    if (d < 0.60) intensidade = 'Forte 🔴';
-    else if (d < 0.80) intensidade = 'Média 🟠';
-    else if (d < 1.00) intensidade = 'Leve 🟡';
-  } else if (alcanceMaximo === 1.50){
-    if (d < 0.40) intensidade = 'Forte 🔴';
-    else if (d < 0.80) intensidade = 'Média 🟠';
-    else if (d < 1.50) intensidade = 'Leve 🟡';
+  if (alcanceMaximo === 1.0) {
+    if (d < 0.6) intensidade = 'Forte 🔴';
+    else if (d < 0.8) intensidade = 'Média 🟠';
+    else if (d < 1.0) intensidade = 'Leve 🟡';
+  } else if (alcanceMaximo === 1.5) {
+    if (d < 0.4) intensidade = 'Forte 🔴';
+    else if (d < 0.8) intensidade = 'Média 🟠';
+    else if (d < 1.5) intensidade = 'Leve 🟡';
   } else {
     const forte = alcanceMaximo * 0.4;
     const media = alcanceMaximo * 0.7;
@@ -60,50 +65,80 @@ function simulateSensorReading(distanceMeters){
 
   // Atualiza barra visual (percentual em relação ao alcanceMaximo)
   const percentual = Math.min(d / alcanceMaximo, 1);
-  viewFill.style.width = (percentual * 100) + '%';
+  viewFill.style.width = percentual * 100 + '%';
+}
+
+function getFirebaseAuth() {
+  if (typeof firebase === 'undefined' || !firebase.auth) return null;
+  return firebase.auth();
+}
+
+function getFirebaseDatabase() {
+  if (typeof firebase === 'undefined' || !firebase.database) return null;
+  return firebase.database();
+}
+
+function getConfigRef(uid) {
+  const db = getFirebaseDatabase();
+  if (!db || !uid) return null;
+  return db.ref(`configuracoes/${uid}`);
+}
+
+function getStateRef() {
+  const db = getFirebaseDatabase();
+  if (!db) return null;
+  return db.ref(`estado_dispositivo/${deviceId}`);
 }
 
 // Conectar / desconectar simulado
 let conectado = false;
-btnConectar.addEventListener('click', ()=>{
+btnConectar.addEventListener('click', () => {
   conectado = !conectado;
   txtStatus.textContent = conectado ? 'Conectado' : 'Desconectado';
   btnConectar.textContent = conectado ? 'Desconectar' : 'Conectar ao Óculos';
 });
 
 // Modos rápidos
-modes.forEach(b=>{
-  b.addEventListener('click', ()=>{
-    modes.forEach(x=>x.classList.remove('active'));
+modes.forEach((b) => {
+  b.addEventListener('click', () => {
+    modes.forEach((x) => x.classList.remove('active'));
     b.classList.add('active');
     const v = parseFloat(b.dataset.value);
     alcanceMaximo = v;
     seekAlc.value = Math.round(v * 100);
     txtAlcAtual.textContent = alcanceMaximo.toFixed(2) + 'm';
     updateVibrationInfo();
-    showFeedback(`Modo ${v === 1.00 ? 'Perto' : 'Médio'} selecionado`);
+    showFeedback(`Modo ${v === 1.0 ? 'Perto' : 'Médio'} selecionado`);
     // Salva automaticamente no Firebase quando o modo for alterado
-    try { saveConfigToFirebase(alcanceMaximo); } catch(e){ console.warn('saveConfig erro', e); }
-  })
+    try {
+      saveConfigToFirebase(alcanceMaximo);
+    } catch (e) {
+      console.warn('saveConfig erro', e);
+    }
+  });
 });
 
 // Seekbar personalizado
-seekAlc.addEventListener('input', ()=>{
-  const val = parseInt(seekAlc.value,10);
+seekAlc.addEventListener('input', () => {
+  const val = parseInt(seekAlc.value, 10);
   alcanceMaximo = val / 100;
   txtAlcAtual.textContent = alcanceMaximo.toFixed(2) + 'm';
-  modes.forEach(x=>x.classList.remove('active'));
+  modes.forEach((x) => x.classList.remove('active'));
   updateVibrationInfo();
 });
 
 // Ao terminar de ajustar (evento change), salva no Firebase
-seekAlc.addEventListener('change', ()=>{
-  try { saveConfigToFirebase(alcanceMaximo); showFeedback('✅ Configuração salva no Firebase'); }
-  catch(e){ console.warn('saveConfig erro', e); }
+seekAlc.addEventListener('change', () => {
+  try {
+    saveConfigToFirebase(alcanceMaximo);
+    showFeedback('✅ Configuração salva no Firebase');
+  } catch (e) {
+    console.warn('saveConfig erro', e);
+  }
 });
 
 // Salvar: simula salvar local e enviar notificacao
-btnSalvar.addEventListener('click', ()=>{
+btnSalvar.addEventListener('click', () => {
   localStorage.setItem('alcance_maximo', alcanceMaximo);
   // Salva também no Firebase (se inicializado)
   try {
@@ -114,106 +149,224 @@ btnSalvar.addEventListener('click', ()=>{
   showFeedback(`✅ Configuração salva! Alcance: ${alcanceMaximo.toFixed(2)}m`);
 });
 
-function showFeedback(msg){
+function showFeedback(msg) {
   txtFeedback.textContent = msg;
   txtFeedback.style.opacity = '1';
-  setTimeout(()=>{ txtFeedback.style.opacity = '0'; }, 3000);
+  setTimeout(() => {
+    txtFeedback.style.opacity = '0';
+  }, 3000);
 }
 
 // Simulação por controle deslizante
-simRange.addEventListener('input', ()=>{
+simRange.addEventListener('input', () => {
   // Se estivermos recebendo dados em tempo real, ignore a simulação
   if (window._isLiveData) return;
-  const cm = parseInt(simRange.value,10);
+  const cm = parseInt(simRange.value, 10);
   const m = cm / 100; // range em centímetros -> metros
   simulateSensorReading(m);
 });
 
 // Inicialização
 updateVibrationInfo();
-simulateSensorReading(parseInt(simRange.value,10)/100);
+simulateSensorReading(parseInt(simRange.value, 10) / 100);
 
 // Indica se os dados do sensor estão vindo do Realtime DB
 window._isLiveData = false;
 
 // Se o Firebase estiver disponível, habilita listener do status do sensor
 function listenSensorStatus() {
-  if (typeof firebase === 'undefined' || !firebase.database) {
+  const stateRef = getStateRef();
+  if (!stateRef) {
     console.warn('Firebase não disponível: listener de sensor não iniciado.');
     return;
   }
-  const ref = firebase.database().ref('sensor_status/usuario_id');
-  ref.on('value', snapshot => {
-    const data = snapshot.val();
-    console.log('sensor_status snapshot:', data);
-    const simLabel = document.querySelector('.sim-label');
-    if (!data) {
-      // sem dados: voltar para modo simulado
-      window._isLiveData = false;
-      if (simRange) simRange.disabled = false;
-      if (simLabel) simLabel.textContent = 'Simular distância';
-      txtStatus.textContent = 'Desconectado';
-      return;
-    }
+
+  const parseAndApply = (raw) => {
+    if (!raw) return false;
+    // Normalizar nomes de campo
+    const distanceRaw = raw.ultima_distancia !== undefined ? raw.ultima_distancia : raw.distance;
+    const intensityText = raw.vibracao_atual || raw.intensity || raw.vibracao;
+    const intensityNum = raw.vibracao_intensidade || raw.intensity_value || raw.intensityNum;
+
     // Há dados ao vivo: desabilita simulação
     window._isLiveData = true;
     if (simRange) simRange.disabled = true;
+    const simLabel = document.querySelector('.sim-label');
     if (simLabel) simLabel.textContent = 'Ao Vivo';
-    // Atualiza status de conexão
-    txtStatus.textContent = (data.connected ? 'Conectado' : 'Desconectado') + (window._isLiveData ? ' (Ao Vivo)' : '');
 
-    // Se houver distância no payload, atualiza UI
-    if (data.distance !== undefined && data.distance !== null) {
-      // aceitar distância em metros ou centímetros
-      let distanceMeters = Number(data.distance);
-      // Heurística: se o valor é grande (ex: >20), provavelmente está em centímetros
-      if (distanceMeters > 20) {
-        distanceMeters = distanceMeters / 100.0; // cm -> m
+    const connected = raw.conectado || raw.connected || false;
+    txtStatus.textContent =
+      (connected ? 'Conectado' : 'Desconectado') + (window._isLiveData ? ' (Ao Vivo)' : '');
+
+    if (distanceRaw !== undefined && distanceRaw !== null) {
+      let distanceMeters = Number(distanceRaw);
+      if (distanceMeters > 20) distanceMeters = distanceMeters / 100.0;
+      try {
+        simulateSensorReading(Number(distanceMeters));
+      } catch (e) {
+        console.error('Erro ao aplicar leitura do sensor', e);
       }
-      // atualiza elementos de UI usando a função existente
-      try { simulateSensorReading(Number(distanceMeters)); }
-      catch(e){ console.error('Erro ao aplicar leitura do sensor', e); }
     }
 
-    // Se houver intensidade textual, atualiza diretamente
-    if (data.intensity) {
-      txtInt.textContent = data.intensity;
+    if (intensityText) txtInt.textContent = intensityText;
+    if (intensityNum !== undefined && intensityNum !== null) {
+      const num = Number(intensityNum);
+      const percentual = Math.min(Math.max(num / 255, 0), 1);
+      viewFill.style.width = percentual * 100 + '%';
     }
-  }, err => {
-    console.error('Erro no listener sensor_status:', err);
+
+    return true;
+  };
+
+  stateRef.on(
+    'value',
+    (snap) => {
+      const raw = snap.val();
+      if (!parseAndApply(raw)) {
+        window._isLiveData = false;
+        if (simRange) simRange.disabled = false;
+        const simLabel = document.querySelector('.sim-label');
+        if (simLabel) simLabel.textContent = 'Simular distância';
+        txtStatus.textContent = 'Desconectado';
+      }
+    },
+    (err) => {
+      console.error(`Erro no listener estado_dispositivo/${deviceId}:`, err);
+    },
+  );
+}
+
+function listenUserConfig(uid) {
+  const configRef = getConfigRef(uid);
+  if (!configRef) {
+    console.warn('Firebase não disponível: listener de config não iniciado.');
+    return;
+  }
+
+  if (configListenerRef) {
+    configListenerRef.off();
+  }
+
+  configListenerRef = configRef;
+  configRef.on('value', (snap) => {
+    const cfg = snap.val();
+    if (!cfg || cfg.alcance_maximo === undefined || cfg.alcance_maximo === null) return;
+
+    const novoAlcance = Number(cfg.alcance_maximo);
+    if (Number.isNaN(novoAlcance) || novoAlcance <= 0) return;
+
+    alcanceMaximo = novoAlcance;
+    seekAlc.value = Math.round(novoAlcance * 100);
+    txtAlcAtual.textContent = novoAlcance.toFixed(2) + 'm';
+    updateVibrationInfo();
   });
 }
 
-// Inicia listener automaticamente se possível
-try { listenSensorStatus(); } catch(e){ console.warn('listenSensorStatus error', e); }
+// Autenticação anônima (se as regras exigirem auth)
+function ensureAuthAndStart() {
+  const auth = getFirebaseAuth();
+  if (!auth) {
+    try {
+      listenSensorStatus();
+    } catch (e) {
+      console.warn('listenSensorStatus error', e);
+    }
+    return;
+  }
+
+  auth.onAuthStateChanged((user) => {
+    if (user) {
+      currentUid = user.uid;
+      console.log('Autenticado como', user.uid);
+      try {
+        listenSensorStatus();
+        listenUserConfig(user.uid);
+      } catch (e) {
+        console.warn('listenSensorStatus error', e);
+      }
+    } else {
+      auth
+        .signInAnonymously()
+        .then((result) => {
+          currentUid = result.user && result.user.uid ? result.user.uid : null;
+          if (currentUid) {
+            listenUserConfig(currentUid);
+          }
+        })
+        .catch((err) => {
+          console.error('Erro signInAnonymously', err);
+          // fallback: tentar iniciar listener sem auth
+          try {
+            listenSensorStatus();
+          } catch (e) {
+            console.warn('listenSensorStatus error', e);
+          }
+        });
+    }
+  });
+}
+
+// Inicia o processo
+ensureAuthAndStart();
 
 // --- Firebase helper (grava no Realtime Database) ---
 function saveConfigToFirebase(alcance) {
-  if (typeof firebase === 'undefined' || !firebase.database) {
+  const auth = getFirebaseAuth();
+  const db = getFirebaseDatabase();
+  if (!auth || !db) {
     console.warn('Firebase não está disponível no contexto web.');
     return;
   }
-  // Usar o mesmo nó que o app Android para consistência
-  const ref = firebase.database().ref('configuracoes/usuario_id');
-  const payload = {
-    alcance_maximo: alcance,
-    timestamp: Date.now()
+
+  const persistConfig = (uid) => {
+    if (!uid) {
+      console.warn('UID anônimo indisponível para gravar configuração.');
+      return Promise.resolve();
+    }
+
+    const ref = db.ref(`configuracoes/${uid}`);
+    const payload = {
+      alcance_maximo: alcance,
+      timestamp: Date.now(),
+    };
+    return ref
+      .set(payload)
+      .then(() => console.log('Configuração gravada no Firebase'))
+      .catch((err) => console.error('Erro ao gravar no Firebase', err));
   };
-  ref.set(payload)
-    .then(()=> console.log('Configuração gravada no Firebase'))
-    .catch(err => console.error('Erro ao gravar no Firebase', err));
+
+  if (currentUid) {
+    return persistConfig(currentUid);
+  }
+
+  const user = auth.currentUser;
+  if (user && user.uid) {
+    currentUid = user.uid;
+    return persistConfig(user.uid);
+  }
+
+  return auth.signInAnonymously().then((result) => {
+    currentUid = result.user && result.user.uid ? result.user.uid : null;
+    return persistConfig(currentUid);
+  });
 }
 
 // --- Wi‑Fi provisioning via Firebase ---
-btnSendWifi.addEventListener('click', ()=>{
-  const ssid = (wifiSsid && wifiSsid.value || '').trim();
-  const pass = (wifiPass && wifiPass.value || '').trim();
-  if (!ssid) { txtWifiFeedback.textContent = 'Informe o SSID.'; return; }
-  if (!pass) { txtWifiFeedback.textContent = 'Informe a senha.'; return; }
+btnSendWifi.addEventListener('click', () => {
+  const ssid = ((wifiSsid && wifiSsid.value) || '').trim();
+  const pass = ((wifiPass && wifiPass.value) || '').trim();
+  if (!ssid) {
+    txtWifiFeedback.textContent = 'Informe o SSID.';
+    return;
+  }
+  if (!pass) {
+    txtWifiFeedback.textContent = 'Informe a senha.';
+    return;
+  }
   txtWifiFeedback.textContent = 'Enviando...';
   try {
     saveWifiToFirebase(ssid, pass);
-  } catch(e){
+  } catch (e) {
     console.error(e);
     txtWifiFeedback.textContent = 'Erro ao enviar.';
   }
@@ -227,18 +380,22 @@ function saveWifiToFirebase(ssid, password) {
   }
   // Atenção: este exemplo envia a senha em texto claro ao Realtime DB.
   // Em produção, use autenticação e/ou criptografia no cliente ou no dispositivo receptor.
-  const ref = firebase.database().ref('wifi_credentials/usuario_id');
+  const ref = firebase.database().ref(`wifi_credentials/${deviceId}`);
   const payload = {
     ssid: ssid,
     password: password,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
-  ref.set(payload)
-    .then(()=> {
+  ref
+    .set(payload)
+    .then(() => {
       console.log('Credenciais Wi‑Fi gravadas no Firebase');
       txtWifiFeedback.textContent = 'Credenciais enviadas com sucesso.';
       // limpa campos
       if (wifiPass) wifiPass.value = '';
     })
-    .catch(err => { console.error(err); txtWifiFeedback.textContent = 'Erro ao gravar credenciais.'; });
+    .catch((err) => {
+      console.error(err);
+      txtWifiFeedback.textContent = 'Erro ao gravar credenciais.';
+    });
 }

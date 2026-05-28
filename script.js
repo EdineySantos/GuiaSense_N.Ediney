@@ -107,6 +107,14 @@ function syncDeviceRegistry(uid, origin) {
   });
 }
 
+function reportFirebaseIssue(message, error) {
+  console.error(message, error);
+  if (txtFeedback) {
+    txtFeedback.textContent = `${message}`;
+    txtFeedback.style.opacity = '1';
+  }
+}
+
 // Conectar / desconectar simulado
 let conectado = false;
 btnConectar.addEventListener('click', () => {
@@ -312,7 +320,10 @@ function ensureAuthAndStart() {
           }
         })
         .catch((err) => {
-          console.error('Erro signInAnonymously', err);
+          reportFirebaseIssue(
+            'Falha no login anônimo do Firebase. Verifique domínios autorizados e regras.',
+            err,
+          );
           // fallback: tentar iniciar listener sem auth
           try {
             listenSensorStatus();
@@ -364,10 +375,16 @@ function saveConfigToFirebase(alcance) {
     return persistConfig(user.uid);
   }
 
-  return auth.signInAnonymously().then((result) => {
-    currentUid = result.user && result.user.uid ? result.user.uid : null;
-    return persistConfig(currentUid);
-  });
+  return auth
+    .signInAnonymously()
+    .then((result) => {
+      currentUid = result.user && result.user.uid ? result.user.uid : null;
+      return persistConfig(currentUid);
+    })
+    .catch((err) => {
+      reportFirebaseIssue('Não foi possível autenticar para salvar a configuração.', err);
+      throw err;
+    });
 }
 
 // --- Wi‑Fi provisioning via Firebase ---

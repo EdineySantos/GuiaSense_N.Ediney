@@ -90,6 +90,23 @@ function getStateRef() {
   return db.ref(`estado_dispositivo/${deviceId}`);
 }
 
+function getDeviceRef() {
+  const db = getFirebaseDatabase();
+  if (!db) return null;
+  return db.ref(`dispositivos/${deviceId}`);
+}
+
+function syncDeviceRegistry(uid, origin) {
+  const ref = getDeviceRef();
+  if (!ref || !uid) return Promise.resolve();
+
+  return ref.update({
+    uid_proprietario: uid,
+    atualizado_em: Date.now(),
+    origem: origin,
+  });
+}
+
 // Conectar / desconectar simulado
 let conectado = false;
 btnConectar.addEventListener('click', () => {
@@ -279,6 +296,7 @@ function ensureAuthAndStart() {
       currentUid = user.uid;
       console.log('Autenticado como', user.uid);
       try {
+        syncDeviceRegistry(user.uid, 'web');
         listenSensorStatus();
         listenUserConfig(user.uid);
       } catch (e) {
@@ -327,10 +345,11 @@ function saveConfigToFirebase(alcance) {
     const ref = db.ref(`configuracoes/${uid}`);
     const payload = {
       alcance_maximo: alcance,
-      timestamp: Date.now(),
+      atualizado_em: Date.now(),
     };
     return ref
       .set(payload)
+      .then(() => syncDeviceRegistry(uid, 'web'))
       .then(() => console.log('Configuração gravada no Firebase'))
       .catch((err) => console.error('Erro ao gravar no Firebase', err));
   };
@@ -384,7 +403,7 @@ function saveWifiToFirebase(ssid, password) {
   const payload = {
     ssid: ssid,
     password: password,
-    timestamp: Date.now(),
+    atualizado_em: Date.now(),
   };
   ref
     .set(payload)

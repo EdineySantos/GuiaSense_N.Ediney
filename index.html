@@ -89,6 +89,16 @@
       appId: "1:658225888828:android:d6908a013a9d94deb24d39"
     };
     firebase.initializeApp(firebaseConfig);
+
+    // Adicione isso logo após as configurações do firebase.initializeApp(...)
+    firebase.auth().signInAnonymously()
+      .then(() => {
+        console.log("Site autenticado anonimamente no Firebase!");
+      })
+      .catch((error) => {
+        console.error("Erro na autenticação do site:", error.code, error.message);
+      });
+    
   </script>
   <script src="script.js"></script>
 </body>

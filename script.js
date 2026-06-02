@@ -82,7 +82,6 @@ modes.forEach(b=>{
     txtAlcAtual.textContent = alcanceMaximo.toFixed(2) + 'm';
     updateVibrationInfo();
     showFeedback(`Modo ${v === 1.00 ? 'Perto' : 'Médio'} selecionado`);
-    // Salva automaticamente no Firebase quando o modo for alterado
     try { saveConfigToFirebase(alcanceMaximo); } catch(e){ console.warn('saveConfig erro', e); }
   })
 });
@@ -105,7 +104,6 @@ seekAlc.addEventListener('change', ()=>{
 // Salvar: simula salvar local e enviar notificacao
 btnSalvar.addEventListener('click', ()=>{
   localStorage.setItem('alcance_maximo', alcanceMaximo);
-  // Salva também no Firebase (se inicializado)
   try {
     saveConfigToFirebase(alcanceMaximo);
   } catch (e) {
@@ -122,37 +120,49 @@ function showFeedback(msg){
 
 // Simulação por controle deslizante
 simRange.addEventListener('input', ()=>{
-  // Se estivermos recebendo dados em tempo real, ignore a simulação
   if (window._isLiveData) return;
   const cm = parseInt(simRange.value,10);
   const m = cm / 100; // range em centímetros -> metros
   simulateSensorReading(m);
 });
 
-// Inicialização
+// Inicialização da interface
 updateVibrationInfo();
 simulateSensorReading(parseInt(simRange.value,10)/100);
-
-// Indica se os dados do sensor estão vindo do Realtime DB
 window._isLiveData = false;
 
-// Se o Firebase estiver disponível, habilita listener do status do sensor
+// --- Configuração e Autenticação Firebase ---
+
+if (typeof firebase !== 'undefined' && firebase.auth) {
+  // Autenticação Anônima no Web App
+  firebase.auth().signInAnonymously()
+    .then(() => {
+      console.log("Página logada anonimamente no Firebase com sucesso!");
+      // Inicia a escuta dos dados apenas após o login
+      listenSensorStatus();
+    })
+    .catch((error) => {
+      console.error("Erro ao autenticar a página web:", error.code, error.message);
+      txtStatus.textContent = 'Erro de Autenticação';
+    });
+} else {
+  console.warn('Firebase ou Firebase Auth não disponível. Modo simulado ativo.');
+}
+
+// Habilita listener do status do sensor
 function listenSensorStatus() {
   if (typeof firebase === 'undefined' || !firebase.database) {
-    console.warn('Firebase não disponível: listener de sensor não iniciado.');
+    console.warn('Firebase Database não disponível.');
     return;
   }
   
-  // ---> Ajuste 1: Lendo do nó 'estado_dispositivo' simplificado <---
   const ref = firebase.database().ref('estado_dispositivo');
   
   ref.on('value', snapshot => {
     const data = snapshot.val();
-    console.log('estado_dispositivo snapshot:', data);
     const simLabel = document.querySelector('.sim-label');
     
     if (!data) {
-      // sem dados: voltar para modo simulado
       window._isLiveData = false;
       if (simRange) simRange.disabled = false;
       if (simLabel) simLabel.textContent = 'Simular distância';
@@ -160,25 +170,25 @@ function listenSensorStatus() {
       return;
     }
     
-    // Há dados ao vivo: desabilita simulação
+    // Há dados ao vivo
     window._isLiveData = true;
     if (simRange) simRange.disabled = true;
     if (simLabel) simLabel.textContent = 'Ao Vivo';
     
-    // ---> Ajuste 2: Lendo 'conectado' ao invés de 'connected' <---
+    // Atualiza status de conexão
     txtStatus.textContent = (data.conectado ? 'Conectado' : 'Desconectado') + (window._isLiveData ? ' (Ao Vivo)' : '');
 
-    // ---> Ajuste 3: Lendo 'ultima_distancia' ao invés de 'distance' <---
+    // Atualiza distância
     if (data.ultima_distancia !== undefined && data.ultima_distancia !== null) {
       let distanceMeters = Number(data.ultima_distancia);
       if (distanceMeters > 20) {
-        distanceMeters = distanceMeters / 100.0; // cm -> m
+        distanceMeters = distanceMeters / 100.0; // cm -> m se o valor for muito alto
       }
       try { simulateSensorReading(Number(distanceMeters)); }
       catch(e){ console.error('Erro ao aplicar leitura do sensor', e); }
     }
 
-    // ---> Ajuste 4: Lendo 'vibracao_atual' ao invés de 'intensity' <---
+    // Atualiza vibração
     if (data.vibracao_atual) {
       txtInt.textContent = data.vibracao_atual;
     }
@@ -187,9 +197,6 @@ function listenSensorStatus() {
   });
 }
 
-// Inicia listener automaticamente se possível
-try { listenSensorStatus(); } catch(e){ console.warn('listenSensorStatus error', e); }
-
 // --- Firebase helper (grava no Realtime Database) ---
 function saveConfigToFirebase(alcance) {
   if (typeof firebase === 'undefined' || !firebase.database) {
@@ -197,7 +204,6 @@ function saveConfigToFirebase(alcance) {
     return;
   }
   
-  // ---> Ajuste 5: Nó 'configuracoes' direto <---
   const ref = firebase.database().ref('configuracoes');
   
   const payload = {
@@ -231,7 +237,6 @@ function saveWifiToFirebase(ssid, password) {
     return;
   }
   
-  // ---> Ajuste 6: Nó 'credenciais_wifi' direto (sem usuario_id) <---
   const ref = firebase.database().ref('credenciais_wifi');
   const payload = {
     ssid: ssid,
@@ -243,7 +248,6 @@ function saveWifiToFirebase(ssid, password) {
     .then(()=> {
       console.log('Credenciais Wi‑Fi gravadas no Firebase');
       txtWifiFeedback.textContent = 'Credenciais enviadas com sucesso.';
-      // limpa campos
       if (wifiPass) wifiPass.value = '';
     })
     .catch(err => { console.error(err); txtWifiFeedback.textContent = 'Erro ao gravar credenciais.'; });

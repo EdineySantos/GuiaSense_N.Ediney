@@ -101,14 +101,11 @@ seekAlc.addEventListener('change', ()=>{
   catch(e){ console.warn('saveConfig erro', e); }
 });
 
-// Salvar: simula salvar local e enviar notificacao
+// Salvar manual na web
 btnSalvar.addEventListener('click', ()=>{
   localStorage.setItem('alcance_maximo', alcanceMaximo);
-  try {
-    saveConfigToFirebase(alcanceMaximo);
-  } catch (e) {
-    console.warn('Erro ao tentar salvar no Firebase', e);
-  }
+  try { saveConfigToFirebase(alcanceMaximo); } 
+  catch (e) { console.warn('Erro ao tentar salvar no Firebase', e); }
   showFeedback(`✅ Configuração salva! Alcance: ${alcanceMaximo.toFixed(2)}m`);
 });
 
@@ -131,15 +128,22 @@ updateVibrationInfo();
 simulateSensorReading(parseInt(simRange.value,10)/100);
 window._isLiveData = false;
 
-// --- Configuração e Autenticação Firebase ---
+
+// ==========================================
+// CONFIGURAÇÃO E AUTENTICAÇÃO FIREBASE
+// ==========================================
 
 if (typeof firebase !== 'undefined' && firebase.auth) {
   // Autenticação Anônima no Web App
   firebase.auth().signInAnonymously()
     .then(() => {
       console.log("Página logada anonimamente no Firebase com sucesso!");
+      
       // Inicia a escuta dos dados apenas após o login
       listenSensorStatus();
+      
+      // Inicia a sincronização das configurações
+      listenConfig(); 
     })
     .catch((error) => {
       console.error("Erro ao autenticar a página web:", error.code, error.message);
@@ -149,7 +153,12 @@ if (typeof firebase !== 'undefined' && firebase.auth) {
   console.warn('Firebase ou Firebase Auth não disponível. Modo simulado ativo.');
 }
 
-// Habilita listener do status do sensor
+
+// ==========================================
+// LISTENERS (ESCUTANDO O BANCO DE DADOS)
+// ==========================================
+
+// 1. Escuta o status do sensor (Distância e Vibração)
 function listenSensorStatus() {
   if (typeof firebase === 'undefined' || !firebase.database) {
     console.warn('Firebase Database não disponível.');
@@ -178,17 +187,17 @@ function listenSensorStatus() {
     // Atualiza status de conexão
     txtStatus.textContent = (data.conectado ? 'Conectado' : 'Desconectado') + (window._isLiveData ? ' (Ao Vivo)' : '');
 
-    // Atualiza distância
+    // Atualiza distância lida do ESP32
     if (data.ultima_distancia !== undefined && data.ultima_distancia !== null) {
       let distanceMeters = Number(data.ultima_distancia);
       if (distanceMeters > 20) {
-        distanceMeters = distanceMeters / 100.0; // cm -> m se o valor for muito alto
+        distanceMeters = distanceMeters / 100.0; // converte cm para m se necessário
       }
       try { simulateSensorReading(Number(distanceMeters)); }
       catch(e){ console.error('Erro ao aplicar leitura do sensor', e); }
     }
 
-    // Atualiza vibração
+    // Atualiza vibração calculada pelo ESP32
     if (data.vibracao_atual) {
       txtInt.textContent = data.vibracao_atual;
     }
@@ -197,7 +206,42 @@ function listenSensorStatus() {
   });
 }
 
-// --- Firebase helper (grava no Realtime Database) ---
+// 2. Escuta as configurações (Sincronização com o App Android)
+function listenConfig() {
+  if (typeof firebase === 'undefined' || !firebase.database) return;
+  
+  const ref = firebase.database().ref('configuracoes/alcance_maximo');
+  
+  ref.on('value', snapshot => {
+    const val = snapshot.val();
+    if (val !== null) {
+      // Atualiza a variável global
+      alcanceMaximo = Number(val);
+      
+      // Atualiza a Interface do Site sem disparar eventos de "change"
+      seekAlc.value = Math.round(alcanceMaximo * 100);
+      txtAlcAtual.textContent = alcanceMaximo.toFixed(2) + 'm';
+      updateVibrationInfo();
+      
+      // Atualiza os botões de "Modo Rápido" visualmente
+      modes.forEach(x => x.classList.remove('active'));
+      modes.forEach(b => {
+        if (parseFloat(b.dataset.value) === alcanceMaximo) {
+          b.classList.add('active');
+        }
+      });
+      
+      console.log('Alcance sincronizado do Firebase:', alcanceMaximo);
+    }
+  });
+}
+
+
+// ==========================================
+// WRITERS (GRAVANDO NO BANCO DE DADOS)
+// ==========================================
+
+// Grava o Alcance Máximo
 function saveConfigToFirebase(alcance) {
   if (typeof firebase === 'undefined' || !firebase.database) {
     console.warn('Firebase não está disponível no contexto web.');
@@ -215,7 +259,7 @@ function saveConfigToFirebase(alcance) {
     .catch(err => console.error('Erro ao gravar no Firebase', err));
 }
 
-// --- Wi‑Fi provisioning via Firebase ---
+// Grava as Credenciais de Wi-Fi para o ESP32 ler
 btnSendWifi.addEventListener('click', ()=>{
   const ssid = (wifiSsid && wifiSsid.value || '').trim();
   const pass = (wifiPass && wifiPass.value || '').trim();
